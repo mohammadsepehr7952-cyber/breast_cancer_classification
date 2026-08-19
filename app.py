@@ -51,18 +51,26 @@ set_background("background.png")
 st.title("🎗️ پیش‌بینی سرطان سینه با Logistic Regression")
 st.caption("پروژه کلاسی‌فیکیشن پیشرفته — SMOTE + Hyperparameter Tuning + AUC")
 
-# ---------- آپلود فایل ----------
-uploaded_file = st.file_uploader("فایل CSV دیتاست سرطان سینه را آپلود کن (مثل data.csv)", type=["csv"])
+# ---------- بارگذاری داده ----------
+st.sidebar.header("منبع داده")
+use_uploaded = st.sidebar.toggle("آپلود فایل CSV دستی (اختیاری)", value=False)
 
-if uploaded_file is None:
-    st.info("برای شروع، فایل data.csv را از کامپیوترت آپلود کن.")
-    st.stop()
-
-try:
-    raw_data = pd.read_csv(uploaded_file)
-except Exception:
-    st.error("❌ نتونستم فایل رو بخونم. مطمئن شو فایل واقعاً CSV معتبره.")
-    st.stop()
+if use_uploaded:
+    uploaded_file = st.file_uploader("فایل CSV دیتاست سرطان سینه را آپلود کن", type=["csv"])
+    if uploaded_file is None:
+        st.info("منتظر آپلود فایل...")
+        st.stop()
+    try:
+        raw_data = pd.read_csv(uploaded_file)
+    except Exception:
+        st.error("❌ نتونستم فایل رو بخونم. مطمئن شو فایل واقعاً CSV معتبره.")
+        st.stop()
+else:
+    try:
+        raw_data = pd.read_csv("data.csv")
+    except FileNotFoundError:
+        st.error("❌ فایل data.csv کنار app.py پیدا نشد. مطمئن شو تو ریپازیتوری گیت‌هابت هست.")
+        st.stop()
 
 # ---------- چک کردن ستون‌های مورد نیاز ----------
 required_min_cols = ["diagnosis", "radius_mean", "texture_mean", "perimeter_mean", "area_mean"]
