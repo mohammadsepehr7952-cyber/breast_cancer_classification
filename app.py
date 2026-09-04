@@ -1,4 +1,6 @@
 import base64
+import io
+from datetime import datetime
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
@@ -6,6 +8,14 @@ import seaborn as sb
 import streamlit as st
 from sklearn.model_selection import train_test_split, KFold, cross_val_score, GridSearchCV
 from sklearn.linear_model import LogisticRegression
+from sklearn.naive_bayes import GaussianNB
+from sklearn.neighbors import KNeighborsClassifier
+from sklearn.tree import DecisionTreeClassifier
+from sklearn.ensemble import RandomForestClassifier
+from xgboost import XGBClassifier
+from lightgbm import LGBMClassifier
+from catboost import CatBoostClassifier
+from sklearn.preprocessing import StandardScaler
 from sklearn.decomposition import PCA
 from sklearn.metrics import (classification_report, confusion_matrix, roc_curve,
                               roc_auc_score, accuracy_score)
@@ -41,6 +51,11 @@ def set_background(image_path):
         div[data-testid="stTabs"] button {{
             color: #dbe4ff;
         }}
+        .stMarkdown, .stMarkdown p, .stMarkdown li, .stMarkdown ul, .stMarkdown ol,
+        .stMarkdown h1, .stMarkdown h2, .stMarkdown h3, .stMarkdown h4 {{
+            direction: rtl;
+            text-align: right;
+        }}
         </style>
         """,
         unsafe_allow_html=True,
@@ -48,8 +63,37 @@ def set_background(image_path):
 
 set_background("background.png")
 
-st.title("🎗️ پیش‌بینی سرطان سینه با Logistic Regression")
-st.caption("پروژه کلاسی‌فیکیشن پیشرفته — SMOTE + Hyperparameter Tuning + AUC")
+st.title("🎗️ پیش‌بینی سرطان سینه با چند مدل کلاسیفیکیشن")
+st.caption("پروژه کلاسی‌فیکیشن پیشرفته — SMOTE + Hyperparameter Tuning + Logistic Regression / Naive Bayes / KNN / Decision Tree / Random Forest / XGBoost / LightGBM / CatBoost")
+
+# ---------- توابع کش‌شده (برای جلوگیری از اجرای دوباره‌ی محاسبات سنگین در هر rerun) ----------
+@st.cache_data
+def load_default_data():
+    return pd.read_csv("data.csv")
+
+
+@st.cache_data
+def load_uploaded_data(file_bytes: bytes):
+    return pd.read_csv(io.BytesIO(file_bytes))
+
+
+@st.cache_data
+def clean_data(raw_data: pd.DataFrame) -> pd.DataFrame:
+    data = raw_data.copy()
+    drop_candidates = [c for c in ["id", "Unnamed: 32"] if c in data.columns]
+    data = data.drop(columns=drop_candidates)
+    data["target"] = data["diagnosis"].map({"M": 0, "B": 1})
+    data = data.drop(columns=["diagnosis"])
+    data = data.dropna(subset=["target"])
+    data = data.fillna(data.median(numeric_only=True))
+    return data
+
+
+@st.cache_data
+def compute_pca(data: pd.DataFrame, feature_cols: list):
+    pca = PCA(n_components=2)
+    return pca.fit_transform(data[feature_cols])
+
 
 # ---------- بارگذاری داده ----------
 st.sidebar.header("منبع داده")
@@ -61,13 +105,13 @@ if use_uploaded:
         st.info("منتظر آپلود فایل...")
         st.stop()
     try:
-        raw_data = pd.read_csv(uploaded_file)
+        raw_data = load_uploaded_data(uploaded_file.getvalue())
     except Exception:
         st.error("❌ نتونستم فایل رو بخونم. مطمئن شو فایل واقعاً CSV معتبره.")
         st.stop()
 else:
     try:
-        raw_data = pd.read_csv("data.csv")
+        raw_data = load_default_data()
     except FileNotFoundError:
         st.error("❌ فایل data.csv کنار app.py پیدا نشد. مطمئن شو تو ریپازیتوری گیت‌هابت هست.")
         st.stop()
@@ -94,18 +138,14 @@ if raw_data.shape[0] < 20:
     st.warning(f"⚠️ فایل آپلودشده فقط {raw_data.shape[0]} ردیف داره — برای مدل‌سازی داده‌ی کافی نیست.")
     st.stop()
 
-# ---------- پاکسازی داده ----------
-data = raw_data.copy()
-drop_candidates = [c for c in ["id", "Unnamed: 32"] if c in data.columns]
-data = data.drop(columns=drop_candidates)
-data["target"] = data["diagnosis"].map({"M": 0, "B": 1})
-data = data.drop(columns=["diagnosis"])
-data = data.dropna(subset=["target"])
-data = data.fillna(data.median(numeric_only=True))
-
+# ---------- پاکسازی داده (کش‌شده) ----------
+data = clean_data(raw_data)
 feature_cols = [c for c in data.columns if c != "target"]
 
-tab1, tab2, tab3, tab4 = st.tabs(["📊 بررسی داده (EDA)", "⚖️ SMOTE و توازن", "🤖 مدل‌سازی", "🔮 پیش‌بینی نمونه جدید"])
+tab1, tab2, tab3, tab4, tab5 = st.tabs([
+    "📊 بررسی داده (EDA)", "⚖️ SMOTE و توازن", "🤖 مدل‌سازی",
+    "🔮 پیش‌بینی نمونه جدید", "📝 گزارش نهایی"
+])
 
 # ---------- تب ۱: EDA ----------
 with tab1:
@@ -133,10 +173,8 @@ with tab1:
     st.pyplot(fig2)
 
     st.subheader("تصویرسازی PCA (فشرده‌سازی ۳۰ ویژگی به ۲ بعد)")
-    X_raw = data[feature_cols]
     y_raw = data["target"]
-    pca = PCA(n_components=2)
-    X_pca = pca.fit_transform(X_raw)
+    X_pca = compute_pca(data, feature_cols)
     fig3, ax3 = plt.subplots(figsize=(7, 5))
     sb.scatterplot(x=X_pca[:, 0], y=X_pca[:, 1], hue=y_raw, palette={0: "red", 1: "green"}, ax=ax3)
     ax3.set_xlabel("PC1")
@@ -173,43 +211,203 @@ with tab2:
 
 # ---------- تب ۳: مدل‌سازی ----------
 with tab3:
-    st.subheader("جستجوی خودکار بهترین Hyperparameter (C) با GridSearchCV")
+    st.subheader("آموزش و مقایسه هشت مدل: LR / NB / KNN / Decision Tree / Random Forest / XGBoost / LightGBM / CatBoost")
+    st.caption(
+        "هر هشت مدل روی همون داده‌ی Train متوازن‌شده با SMOTE آموزش می‌بینن و روی همون Test دست‌نخورده "
+        "ارزیابی می‌شن تا مقایسه‌شون منصفانه باشه."
+    )
 
-    if st.button("🔍 اجرای GridSearchCV و آموزش مدل"):
-        with st.spinner("در حال جستجوی بهترین C و آموزش مدل..."):
-            param_grid = {"C": [0.01, 0.1, 1, 5, 10, 20, 50]}
-            grid = GridSearchCV(
+    if st.button("🔍 آموزش و مقایسه هر هشت مدل"):
+        with st.spinner("در حال جستجوی بهترین Hyperparameter و آموزش مدل‌ها..."):
+
+            # ---------- Logistic Regression ----------
+            param_grid_lr = {"C": [0.01, 0.1, 1, 5, 10, 20, 50]}
+            grid_lr = GridSearchCV(
                 LogisticRegression(solver="liblinear", random_state=0),
-                param_grid, cv=5, scoring="roc_auc"
+                param_grid_lr, cv=5, scoring="roc_auc"
             )
-            grid.fit(X_train_sm, y_train_sm)
-            best_C = grid.best_params_["C"]
+            grid_lr.fit(X_train_sm, y_train_sm)
+            best_C = grid_lr.best_params_["C"]
 
-            model = LogisticRegression(solver="liblinear", C=best_C, random_state=0)
-            model.fit(X_train_sm, y_train_sm)
+            lr_model = LogisticRegression(solver="liblinear", C=best_C, random_state=0)
+            lr_model.fit(X_train_sm, y_train_sm)
+            y_pred_lr = lr_model.predict(X_test_full)
+            y_proba_lr = lr_model.predict_proba(X_test_full)[:, 1]
+            acc_lr = accuracy_score(y_test_full, y_pred_lr)
+            auc_lr = roc_auc_score(y_test_full, y_proba_lr)
+            cv_lr = cross_val_score(lr_model, X_train_sm, y_train_sm, cv=KFold(10)).mean()
 
-            y_pred = model.predict(X_test_full)
-            y_proba = model.predict_proba(X_test_full)[:, 1]
+            # ---------- Naive Bayes ----------
+            nb_model = GaussianNB()
+            nb_model.fit(X_train_sm, y_train_sm)
+            y_pred_nb = nb_model.predict(X_test_full)
+            y_proba_nb = nb_model.predict_proba(X_test_full)[:, 1]
+            acc_nb = accuracy_score(y_test_full, y_pred_nb)
+            auc_nb = roc_auc_score(y_test_full, y_proba_nb)
+            cv_nb = cross_val_score(nb_model, X_train_sm, y_train_sm, cv=KFold(10)).mean()
 
-            acc = accuracy_score(y_test_full, y_pred)
-            auc = roc_auc_score(y_test_full, y_proba)
+            # ---------- KNN (نیاز به Scale کردن داده داره) ----------
+            scaler = StandardScaler()
+            X_train_sm_scaled = scaler.fit_transform(X_train_sm)
+            X_test_scaled = scaler.transform(X_test_full)
 
-            kf = KFold(10)
-            cv_scores = cross_val_score(model, X_train_sm, y_train_sm, cv=kf)
+            param_grid_knn = {"n_neighbors": list(range(1, 21))}
+            grid_knn = GridSearchCV(KNeighborsClassifier(), param_grid_knn, cv=5, scoring="roc_auc")
+            grid_knn.fit(X_train_sm_scaled, y_train_sm)
+            best_k = grid_knn.best_params_["n_neighbors"]
 
-            st.session_state["model_results"] = {
-                "best_C": best_C, "model": model, "acc": acc, "auc": auc,
-                "cv_scores": cv_scores, "y_test": y_test_full, "y_pred": y_pred, "y_proba": y_proba,
+            knn_model = KNeighborsClassifier(n_neighbors=best_k)
+            knn_model.fit(X_train_sm_scaled, y_train_sm)
+            y_pred_knn = knn_model.predict(X_test_scaled)
+            y_proba_knn = knn_model.predict_proba(X_test_scaled)[:, 1]
+            acc_knn = accuracy_score(y_test_full, y_pred_knn)
+            auc_knn = roc_auc_score(y_test_full, y_proba_knn)
+            cv_knn = cross_val_score(knn_model, X_train_sm_scaled, y_train_sm, cv=KFold(10)).mean()
+
+            # ---------- Decision Tree ----------
+            param_grid_dt = {"max_depth": [3, 4, 5, 6, 7, 8, None]}
+            grid_dt = GridSearchCV(
+                DecisionTreeClassifier(random_state=0),
+                param_grid_dt, cv=5, scoring="roc_auc"
+            )
+            grid_dt.fit(X_train_sm, y_train_sm)
+            best_depth_dt = grid_dt.best_params_["max_depth"]
+
+            dt_model = DecisionTreeClassifier(max_depth=best_depth_dt, random_state=0)
+            dt_model.fit(X_train_sm, y_train_sm)
+            y_pred_dt = dt_model.predict(X_test_full)
+            y_proba_dt = dt_model.predict_proba(X_test_full)[:, 1]
+            acc_dt = accuracy_score(y_test_full, y_pred_dt)
+            auc_dt = roc_auc_score(y_test_full, y_proba_dt)
+            cv_dt = cross_val_score(dt_model, X_train_sm, y_train_sm, cv=KFold(10)).mean()
+
+            # ---------- Random Forest ----------
+            param_grid_rf = {"n_estimators": [100, 150, 200], "max_depth": [5, 7, 9]}
+            grid_rf = GridSearchCV(
+                RandomForestClassifier(random_state=0),
+                param_grid_rf, cv=5, scoring="roc_auc"
+            )
+            grid_rf.fit(X_train_sm, y_train_sm)
+            best_params_rf = grid_rf.best_params_
+
+            rf_model = RandomForestClassifier(
+                n_estimators=best_params_rf["n_estimators"],
+                max_depth=best_params_rf["max_depth"], random_state=0
+            )
+            rf_model.fit(X_train_sm, y_train_sm)
+            y_pred_rf = rf_model.predict(X_test_full)
+            y_proba_rf = rf_model.predict_proba(X_test_full)[:, 1]
+            acc_rf = accuracy_score(y_test_full, y_pred_rf)
+            auc_rf = roc_auc_score(y_test_full, y_proba_rf)
+            cv_rf = cross_val_score(rf_model, X_train_sm, y_train_sm, cv=KFold(10)).mean()
+
+            # ---------- XGBoost ----------
+            xgb_model = XGBClassifier(
+                n_estimators=150, learning_rate=0.1, max_depth=5,
+                eval_metric="logloss", random_state=0
+            )
+            xgb_model.fit(X_train_sm, y_train_sm)
+            y_pred_xgb = xgb_model.predict(X_test_full)
+            y_proba_xgb = xgb_model.predict_proba(X_test_full)[:, 1]
+            acc_xgb = accuracy_score(y_test_full, y_pred_xgb)
+            auc_xgb = roc_auc_score(y_test_full, y_proba_xgb)
+            cv_xgb = cross_val_score(xgb_model, X_train_sm, y_train_sm, cv=KFold(10)).mean()
+
+            # ---------- LightGBM ----------
+            lgbm_model = LGBMClassifier(
+                n_estimators=150, learning_rate=0.1, max_depth=5,
+                random_state=0, verbose=-1
+            )
+            lgbm_model.fit(X_train_sm, y_train_sm)
+            y_pred_lgbm = lgbm_model.predict(X_test_full)
+            y_proba_lgbm = lgbm_model.predict_proba(X_test_full)[:, 1]
+            acc_lgbm = accuracy_score(y_test_full, y_pred_lgbm)
+            auc_lgbm = roc_auc_score(y_test_full, y_proba_lgbm)
+            cv_lgbm = cross_val_score(lgbm_model, X_train_sm, y_train_sm, cv=KFold(10)).mean()
+
+            # ---------- CatBoost ----------
+            cat_model = CatBoostClassifier(
+                n_estimators=150, learning_rate=0.1, max_depth=5,
+                random_state=0, verbose=0
+            )
+            cat_model.fit(X_train_sm, y_train_sm)
+            y_pred_cat = cat_model.predict(X_test_full)
+            y_proba_cat = cat_model.predict_proba(X_test_full)[:, 1]
+            acc_cat = accuracy_score(y_test_full, y_pred_cat)
+            auc_cat = roc_auc_score(y_test_full, y_proba_cat)
+            cv_cat = cross_val_score(cat_model, X_train_sm, y_train_sm, cv=KFold(10)).mean()
+
+            st.session_state["all_models"] = {
+                "Logistic Regression": {
+                    "model": lr_model, "acc": acc_lr, "auc": auc_lr, "cv": cv_lr,
+                    "y_test": y_test_full, "y_pred": y_pred_lr, "y_proba": y_proba_lr,
+                    "extra_param": f"C={best_C}", "needs_scaling": False,
+                },
+                "Naive Bayes": {
+                    "model": nb_model, "acc": acc_nb, "auc": auc_nb, "cv": cv_nb,
+                    "y_test": y_test_full, "y_pred": y_pred_nb, "y_proba": y_proba_nb,
+                    "extra_param": "GaussianNB", "needs_scaling": False,
+                },
+                "KNN": {
+                    "model": knn_model, "acc": acc_knn, "auc": auc_knn, "cv": cv_knn,
+                    "y_test": y_test_full, "y_pred": y_pred_knn, "y_proba": y_proba_knn,
+                    "extra_param": f"K={best_k}", "needs_scaling": True, "scaler": scaler,
+                },
+                "Decision Tree": {
+                    "model": dt_model, "acc": acc_dt, "auc": auc_dt, "cv": cv_dt,
+                    "y_test": y_test_full, "y_pred": y_pred_dt, "y_proba": y_proba_dt,
+                    "extra_param": f"max_depth={best_depth_dt}", "needs_scaling": False,
+                },
+                "Random Forest": {
+                    "model": rf_model, "acc": acc_rf, "auc": auc_rf, "cv": cv_rf,
+                    "y_test": y_test_full, "y_pred": y_pred_rf, "y_proba": y_proba_rf,
+                    "extra_param": f"n_estimators={best_params_rf['n_estimators']}, max_depth={best_params_rf['max_depth']}",
+                    "needs_scaling": False,
+                },
+                "XGBoost": {
+                    "model": xgb_model, "acc": acc_xgb, "auc": auc_xgb, "cv": cv_xgb,
+                    "y_test": y_test_full, "y_pred": y_pred_xgb, "y_proba": y_proba_xgb,
+                    "extra_param": "n_estimators=150, lr=0.1, max_depth=5", "needs_scaling": False,
+                },
+                "LightGBM": {
+                    "model": lgbm_model, "acc": acc_lgbm, "auc": auc_lgbm, "cv": cv_lgbm,
+                    "y_test": y_test_full, "y_pred": y_pred_lgbm, "y_proba": y_proba_lgbm,
+                    "extra_param": "n_estimators=150, lr=0.1, max_depth=5", "needs_scaling": False,
+                },
+                "CatBoost": {
+                    "model": cat_model, "acc": acc_cat, "auc": auc_cat, "cv": cv_cat,
+                    "y_test": y_test_full, "y_pred": y_pred_cat, "y_proba": y_proba_cat,
+                    "extra_param": "n_estimators=150, lr=0.1, max_depth=5", "needs_scaling": False,
+                },
             }
 
-    if "model_results" in st.session_state:
-        r = st.session_state["model_results"]
+    if "all_models" in st.session_state:
+        models_dict = st.session_state["all_models"]
 
-        m1, m2, m3, m4 = st.columns(4)
-        m1.metric("بهترین C", r["best_C"])
-        m2.metric("Accuracy", f"{r['acc']:.3f}")
-        m3.metric("AUC", f"{r['auc']:.3f}")
-        m4.metric("میانگین Cross Val", f"{r['cv_scores'].mean():.3f}")
+        st.subheader("جدول مقایسه مدل‌ها")
+        comp_df = pd.DataFrame({
+            "Model": list(models_dict.keys()),
+            "Best Param": [models_dict[m]["extra_param"] for m in models_dict],
+            "Accuracy": [round(models_dict[m]["acc"], 4) for m in models_dict],
+            "AUC": [round(models_dict[m]["auc"], 4) for m in models_dict],
+            "CV Mean": [round(models_dict[m]["cv"], 4) for m in models_dict],
+        })
+        st.dataframe(comp_df, use_container_width=True)
+
+        best_model_name = comp_df.loc[comp_df["AUC"].idxmax(), "Model"]
+        st.success(f"🏆 بهترین مدل بر اساس AUC: **{best_model_name}**")
+
+        st.subheader("جزئیات هر مدل")
+        selected_model_name = st.selectbox(
+            "کدوم مدل رو با جزئیات ببینی؟", list(models_dict.keys()),
+            index=list(models_dict.keys()).index(best_model_name)
+        )
+        r = models_dict[selected_model_name]
+
+        m1, m2, m3 = st.columns(3)
+        m1.metric("Accuracy", f"{r['acc']:.3f}")
+        m2.metric("AUC", f"{r['auc']:.3f}")
+        m3.metric("میانگین Cross Val", f"{r['cv']:.3f}")
 
         st.subheader("نمودار ROC")
         fpr, tpr, _ = roc_curve(r["y_test"], r["y_proba"])
@@ -238,15 +436,19 @@ with tab3:
                                              target_names=["Malignant", "Benign"], output_dict=True)
             st.dataframe(pd.DataFrame(report).transpose().round(3))
     else:
-        st.info("روی دکمه‌ی بالا بزن تا مدل آموزش داده بشه.")
+        st.info("روی دکمه‌ی بالا بزن تا هر سه مدل آموزش داده بشن و مقایسه بشن.")
 
 # ---------- تب ۴: پیش‌بینی نمونه جدید ----------
 with tab4:
-    if "model_results" not in st.session_state:
-        st.warning("اول باید تو تب «مدل‌سازی» مدل رو آموزش بدی.")
+    if "all_models" not in st.session_state:
+        st.warning("اول باید تو تب «مدل‌سازی» مدل‌ها رو آموزش بدی.")
     else:
+        models_dict = st.session_state["all_models"]
         st.subheader("مقادیر ویژگی‌های نمونه‌ی جدید را وارد کن")
-        model = st.session_state["model_results"]["model"]
+
+        predict_model_name = st.selectbox("با کدوم مدل پیش‌بینی بشه؟", list(models_dict.keys()))
+        chosen = models_dict[predict_model_name]
+        model = chosen["model"]
 
         input_vals = {}
         cols = st.columns(3)
@@ -256,10 +458,82 @@ with tab4:
 
         if st.button("پیش‌بینی کن"):
             new_sample = np.array([[input_vals[c] for c in feature_cols]])
+            if chosen.get("needs_scaling"):
+                new_sample = chosen["scaler"].transform(new_sample)
+
             pred = model.predict(new_sample)[0]
             proba = model.predict_proba(new_sample)[0][1]
 
             if pred == 0:
-                st.error(f"⚠️ احتمال خوش‌خیمی: {proba*100:.1f}% — مدل این نمونه را بدخیم (Malignant) پیش‌بینی می‌کند.")
+                st.error(
+                    f"⚠️ احتمال خوش‌خیمی: {proba*100:.1f}% — مدل «{predict_model_name}» "
+                    "این نمونه را بدخیم (Malignant) پیش‌بینی می‌کند."
+                )
             else:
-                st.success(f"✅ احتمال خوش‌خیمی: {proba*100:.1f}% — مدل این نمونه را خوش‌خیم (Benign) پیش‌بینی می‌کند.")
+                st.success(
+                    f"✅ احتمال خوش‌خیمی: {proba*100:.1f}% — مدل «{predict_model_name}» "
+                    "این نمونه را خوش‌خیم (Benign) پیش‌بینی می‌کند."
+                )
+
+# ---------- تب ۵: گزارش نهایی ----------
+with tab5:
+    st.subheader("📝 گزارش نهایی پروژه")
+
+    if "all_models" not in st.session_state:
+        st.warning("برای ساخت گزارش، اول باید تو تب «مدل‌سازی» مدل‌ها رو آموزش بدی.")
+    else:
+        models_dict = st.session_state["all_models"]
+        comp_df = pd.DataFrame({
+            "Model": list(models_dict.keys()),
+            "Accuracy": [round(models_dict[m]["acc"], 4) for m in models_dict],
+            "AUC": [round(models_dict[m]["auc"], 4) for m in models_dict],
+            "CV Mean": [round(models_dict[m]["cv"], 4) for m in models_dict],
+        })
+        best_model_name = comp_df.loc[comp_df["AUC"].idxmax(), "Model"]
+        best_row = comp_df[comp_df["Model"] == best_model_name].iloc[0]
+
+        comp_lines = "\n".join(
+            f"- **{row['Model']}**: Accuracy = {row['Accuracy']} | AUC = {row['AUC']} | CV Mean = {row['CV Mean']}"
+            for _, row in comp_df.iterrows()
+        )
+
+        report_text = f"""# گزارش نهایی پروژه پیش‌بینی سرطان سینه
+
+**تاریخ تولید گزارش:** {datetime.now().strftime('%Y-%m-%d %H:%M')}
+
+## ۱. خلاصه داده
+- تعداد نمونه‌ها: {data.shape[0]}
+- تعداد ویژگی‌ها: {len(feature_cols)}
+- نسبت کلاس خوش‌خیم (Benign): {(data['target'].mean()*100):.1f}%
+- نسبت کلاس بدخیم (Malignant): {(100 - data['target'].mean()*100):.1f}%
+
+## ۲. پیش‌پردازش
+- مقادیر گمشده با میانه (median) هر ستون پر شدند.
+- داده به نسبت ۷۵٪ آموزش / ۲۵٪ آزمون تقسیم شد (با حفظ نسبت کلاس‌ها - stratify).
+- SMOTE فقط روی داده‌ی Train اعمال شد تا کلاس‌ها متوازن بشن، بدون اینکه نشتی داده (Data Leakage) رخ بده.
+- برای مدل KNN، داده علاوه بر این با StandardScaler نرمال‌سازی شد چون KNN فاصله‌محوره.
+
+## ۳. مدل‌های آموزش‌دیده و مقایسه
+{comp_lines}
+
+## ۴. بهترین مدل
+بر اساس معیار AUC، بهترین مدل **{best_model_name}** بود:
+- Accuracy: {best_row['Accuracy']}
+- AUC: {best_row['AUC']}
+- میانگین Cross Validation: {best_row['CV Mean']}
+
+## ۵. جمع‌بندی
+در این پروژه هشت الگوریتم کلاسیفیکیشن (Logistic Regression، Naive Bayes، KNN، Decision Tree، Random Forest،
+XGBoost، LightGBM، CatBoost) روی دیتاست
+Breast Cancer Wisconsin آموزش داده و با معیارهای Accuracy، AUC و Cross Validation مقایسه شدند.
+تمام مدل‌ها روی داده‌ی Train متوازن‌شده با SMOTE آموزش دیدند و روی داده‌ی Test دست‌نخورده
+ارزیابی شدند تا نتیجه‌ی ارزیابی واقعی و بدون نشتی داده باشد.
+"""
+        st.markdown(report_text)
+
+        st.download_button(
+            label="📥 دانلود گزارش (txt)",
+            data=report_text,
+            file_name="breast_cancer_report.txt",
+            mime="text/plain",
+        )
