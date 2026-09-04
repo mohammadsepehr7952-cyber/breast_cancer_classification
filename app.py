@@ -224,7 +224,7 @@ with tab3:
             param_grid_lr = {"C": [0.01, 0.1, 1, 5, 10, 20, 50]}
             grid_lr = GridSearchCV(
                 LogisticRegression(solver="liblinear", random_state=0),
-                param_grid_lr, cv=5, scoring="roc_auc", n_jobs=-1
+                param_grid_lr, cv=5, scoring="roc_auc"
             )
             grid_lr.fit(X_train_sm, y_train_sm)
             best_C = grid_lr.best_params_["C"]
@@ -244,7 +244,7 @@ with tab3:
             y_proba_nb = nb_model.predict_proba(X_test_full)[:, 1]
             acc_nb = accuracy_score(y_test_full, y_pred_nb)
             auc_nb = roc_auc_score(y_test_full, y_proba_nb)
-            cv_nb = cross_val_score(nb_model, X_train_sm, y_train_sm, cv=KFold(5), n_jobs=-1).mean()
+            cv_nb = cross_val_score(nb_model, X_train_sm, y_train_sm, cv=KFold(5)).mean()
 
             # ---------- KNN (نیاز به Scale کردن داده داره) ----------
             scaler = StandardScaler()
@@ -252,11 +252,11 @@ with tab3:
             X_test_scaled = scaler.transform(X_test_full)
 
             param_grid_knn = {"n_neighbors": list(range(1, 21))}
-            grid_knn = GridSearchCV(KNeighborsClassifier(), param_grid_knn, cv=5, scoring="roc_auc", n_jobs=-1)
+            grid_knn = GridSearchCV(KNeighborsClassifier(), param_grid_knn, cv=5, scoring="roc_auc")
             grid_knn.fit(X_train_sm_scaled, y_train_sm)
             best_k = grid_knn.best_params_["n_neighbors"]
 
-            knn_model = KNeighborsClassifier(n_neighbors=best_k, n_jobs=-1)
+            knn_model = KNeighborsClassifier(n_neighbors=best_k)
             knn_model.fit(X_train_sm_scaled, y_train_sm)
             y_pred_knn = knn_model.predict(X_test_scaled)
             y_proba_knn = knn_model.predict_proba(X_test_scaled)[:, 1]
@@ -268,7 +268,7 @@ with tab3:
             param_grid_dt = {"max_depth": [3, 4, 5, 6, 7, 8, None]}
             grid_dt = GridSearchCV(
                 DecisionTreeClassifier(random_state=0),
-                param_grid_dt, cv=5, scoring="roc_auc", n_jobs=-1
+                param_grid_dt, cv=5, scoring="roc_auc"
             )
             grid_dt.fit(X_train_sm, y_train_sm)
             best_depth_dt = grid_dt.best_params_["max_depth"]
@@ -285,14 +285,14 @@ with tab3:
             param_grid_rf = {"n_estimators": [100, 150, 200], "max_depth": [5, 7, 9]}
             grid_rf = GridSearchCV(
                 RandomForestClassifier(random_state=0),
-                param_grid_rf, cv=5, scoring="roc_auc", n_jobs=-1
+                param_grid_rf, cv=5, scoring="roc_auc"
             )
             grid_rf.fit(X_train_sm, y_train_sm)
             best_params_rf = grid_rf.best_params_
 
             rf_model = RandomForestClassifier(
                 n_estimators=best_params_rf["n_estimators"],
-                max_depth=best_params_rf["max_depth"], random_state=0, n_jobs=-1
+                max_depth=best_params_rf["max_depth"], random_state=0
             )
             rf_model.fit(X_train_sm, y_train_sm)
             y_pred_rf = rf_model.predict(X_test_full)
@@ -304,31 +304,31 @@ with tab3:
             # ---------- XGBoost ----------
             xgb_model = XGBClassifier(
                 n_estimators=150, learning_rate=0.1, max_depth=5,
-                eval_metric="logloss", random_state=0, n_jobs=-1
+                eval_metric="logloss", random_state=0
             )
             xgb_model.fit(X_train_sm, y_train_sm)
             y_pred_xgb = xgb_model.predict(X_test_full)
             y_proba_xgb = xgb_model.predict_proba(X_test_full)[:, 1]
             acc_xgb = accuracy_score(y_test_full, y_pred_xgb)
             auc_xgb = roc_auc_score(y_test_full, y_proba_xgb)
-            cv_xgb = cross_val_score(xgb_model, X_train_sm, y_train_sm, cv=KFold(5), n_jobs=-1).mean()
+            cv_xgb = cross_val_score(xgb_model, X_train_sm, y_train_sm, cv=KFold(5)).mean()
 
             # ---------- LightGBM ----------
             lgbm_model = LGBMClassifier(
                 n_estimators=150, learning_rate=0.1, max_depth=5,
-                random_state=0, verbose=-1, n_jobs=-1
+                random_state=0, verbose=-1
             )
             lgbm_model.fit(X_train_sm, y_train_sm)
             y_pred_lgbm = lgbm_model.predict(X_test_full)
             y_proba_lgbm = lgbm_model.predict_proba(X_test_full)[:, 1]
             acc_lgbm = accuracy_score(y_test_full, y_pred_lgbm)
             auc_lgbm = roc_auc_score(y_test_full, y_proba_lgbm)
-            cv_lgbm = cross_val_score(lgbm_model, X_train_sm, y_train_sm, cv=KFold(5), n_jobs=-1).mean()
+            cv_lgbm = cross_val_score(lgbm_model, X_train_sm, y_train_sm, cv=KFold(5)).mean()
 
             # ---------- CatBoost ----------
             cat_model = CatBoostClassifier(
                 n_estimators=150, learning_rate=0.1, max_depth=5,
-                random_state=0, verbose=0, thread_count=-1
+                random_state=0, verbose=0
             )
             cat_model.fit(X_train_sm, y_train_sm)
             y_pred_cat = cat_model.predict(X_test_full)
